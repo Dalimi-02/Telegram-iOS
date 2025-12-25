@@ -313,10 +313,17 @@ public final class MessageInputActionButtonComponent: Component {
                     return
                 }
                 
-                let scale: CGFloat = highlighted ? 0.6 : 1.0
-                
-                let transition = ComponentTransition(animation: .curve(duration: highlighted ? 0.5 : 0.3, curve: .spring))
-                transition.setSublayerTransform(view: self, transform: CATransform3DMakeScale(scale, scale, 1.0))
+                if highlighted {
+                    // Scale down with stretch effect on press
+                    let scale: CGFloat = 0.6
+                    let transition = ComponentTransition(animation: .curve(duration: 0.2, curve: .easeInOut))
+                    transition.setSublayerTransform(view: self, transform: CATransform3DMakeScale(scale, scale * 1.1, 1.0))
+                } else {
+                    // Bounce back with spring animation and slight overshoot
+                    UIView.animate(withDuration: 0.5, delay: 0.0, usingSpringWithDamping: 0.5, initialSpringVelocity: 1.2, options: [.allowUserInteraction, .beginFromCurrentState], animations: {
+                        self.layer.sublayerTransform = CATransform3DIdentity
+                    }, completion: nil)
+                }
             }
             
             self.button.addTarget(self, action: #selector(self.touchDown), forControlEvents: .touchDown)

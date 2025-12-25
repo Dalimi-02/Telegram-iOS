@@ -93,10 +93,28 @@ public final class GlassBarButtonComponent: Component {
                 guard let self else {
                     return
                 }
+
                 if highlighted {
-                    self.containerView.layer.animateSpring(from: CGFloat((self.containerView.layer.presentation()?.value(forKeyPath: "transform.scale.y") as? NSNumber)?.floatValue ?? 1.0) as NSNumber, to: 1.3636 as NSNumber, keyPath: "transform.scale", duration: 0.5, removeOnCompletion: false)
+                    // Scale up with slight stretch on press
+                    let transition: ComponentTransition = .animated(
+                        duration: 0.15,
+                        curve: .easeInOut
+                    )
+                    transition.setScale(
+                        view: self.containerView,
+                        scale: 1.04,
+                        y: 0.96
+                    )
+                    transition.setAlpha(
+                        view: self.containerView,
+                        alpha: 0.98
+                    )
                 } else {
-                    self.containerView.layer.animateSpring(from: CGFloat((self.containerView.layer.presentation()?.value(forKeyPath: "transform.scale.y") as? NSNumber)?.floatValue ?? 1.3636) as NSNumber, to: 1.0 as NSNumber, keyPath: "transform.scale", duration: 0.6)
+                    // Bounce back with spring animation
+                    UIView.animate(withDuration: 0.4, delay: 0.0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0.8, options: [.allowUserInteraction, .beginFromCurrentState], animations: {
+                        self.containerView.transform = CGAffineTransform.identity
+                        self.containerView.alpha = 1.0
+                    }, completion: nil)
                 }
             }
         }

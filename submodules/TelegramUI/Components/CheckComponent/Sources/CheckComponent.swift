@@ -70,6 +70,7 @@ public final class CheckComponent: Component {
     public final class View: UIView {
         private var currentValue: CGFloat?
         private var animator: DisplayLinkAnimator?
+        private var isSelected: Bool = false
 
         private var checkLayer: CheckLayer {
             return self.layer as! CheckLayer
@@ -88,8 +89,24 @@ public final class CheckComponent: Component {
         }
     
         public func update(component: CheckComponent, availableSize: CGSize, transition: ComponentTransition) -> CGSize {
+            let wasSelected = self.isSelected
+            self.isSelected = component.selected
+
             self.checkLayer.setSelected(component.selected, animated: true)
             self.checkLayer.theme = component.theme.checkNodeTheme
+
+            if wasSelected != component.selected {
+                transition.setScale(
+                    view: self,
+                    scale: component.selected ? 1.06 : 1.0,
+                    y: component.selected ? 0.94 : 1.0
+                )
+                
+                transition.setAlpha(
+                    view: self,
+                    alpha: component.selected ? 0.98 : 1.0
+                )
+            }
             
             return component.size
         }

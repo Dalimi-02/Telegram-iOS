@@ -470,12 +470,39 @@ public final class ButtonComponent: Component {
                     case .glass:
                         let transition = ComponentTransition(animation: .curve(duration: highlighted ? 0.25 : 0.35, curve: .spring))
                         if highlighted {
-                            let highlightedColor = component.background.color.withMultiplied(hue: 1.0, saturation: 0.77, brightness: 1.01)
-                            transition.setBackgroundColor(view: self.containerView, color: highlightedColor)
-                            transition.setScale(view: self.containerView, scale: 1.05)
+                            let highlightedColor = component.background.color
+                                .withMultiplied(hue: 1.0, saturation: 0.82, brightness: 1.03)
+
+                            transition.setBackgroundColor(
+                                view: self.containerView,
+                                color: highlightedColor
+                            )
+
+                            transition.setScale(
+                                view: self.containerView,
+                                scale: 1.04,
+                                y: 0.96
+                            )
+                            // Optional, very light feedback:
+                            transition.setAlpha(
+                                view: self.containerView,
+                                alpha: 0.98
+                            )
                         } else {
-                            transition.setBackgroundColor(view: self.containerView, color: component.background.color)
-                            transition.setScale(view: self.containerView, scale: 1.0)
+                            transition.setBackgroundColor(
+                                view: self.containerView,
+                                color: component.background.color
+                            )
+
+                            transition.setScale(
+                                view: self.containerView,
+                                scale: 1.0,
+                                y: 1.0
+                            )
+                            transition.setAlpha(
+                                view: self.containerView,
+                                alpha: 1.0
+                            )
                         }
                     case .legacy:
                         if highlighted {

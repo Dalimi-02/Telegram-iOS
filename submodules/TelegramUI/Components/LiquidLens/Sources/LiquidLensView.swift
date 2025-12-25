@@ -97,6 +97,11 @@ public final class LiquidLensView: UIView {
     private var legacyContentMaskView: UIView?
     private var legacyContentMaskBlobView: UIImageView?
     private var legacyLiftedContentBlobMaskView: UIImageView?
+    private var legacyLensAnimationDisplayLink: SharedDisplayLinkDriver.Link?
+    private var legacyPreviousSelectionX: CGFloat?
+    private var legacyLensVelocity: CGFloat = 0.0
+    private var legacyLensSpringPosition: CGFloat = 0.0
+    private var legacyLensTargetPosition: CGFloat = 0.0
 
     public var selectedContentView: UIView {
         return self.liftedContainerView
@@ -324,8 +329,12 @@ public final class LiquidLensView: UIView {
         transition.setFrame(view: self.backgroundContainer, frame: CGRect(origin: CGPoint(), size: params.size))
         self.backgroundContainer.update(size: params.size, isDark: params.isDark, transition: transition)
         
+        // Omit background blur behind the bar itself, only apply blur in lenses
+        // The backgroundContainer provides blur for lens content, but we make the main background have minimal opacity
+        // so the bar itself doesn't blur content behind it, only the lenses do
         transition.setFrame(view: self.backgroundView, frame: CGRect(origin: CGPoint(), size: params.size))
-        self.backgroundView.update(size: params.size, cornerRadius: params.size.height * 0.5, isDark: params.isDark, tintColor: GlassBackgroundView.TintColor.init(kind: .panel, color: UIColor(white: params.isDark ? 0.0 : 1.0, alpha: 0.6)), isInteractive: true, transition: transition)
+        // Use very low alpha background for the bar (no blur), blur only happens in the lens areas via backgroundContainer
+        self.backgroundView.update(size: params.size, cornerRadius: params.size.height * 0.5, isDark: params.isDark, tintColor: GlassBackgroundView.TintColor.init(kind: .panel, color: UIColor(white: params.isDark ? 0.0 : 1.0, alpha: 0.01)), isInteractive: true, transition: transition)
         
         transition.setFrame(view: self.contentView, frame: CGRect(origin: CGPoint(), size: params.size))
         transition.setFrame(view: self.liftedContainerView, frame: CGRect(origin: CGPoint(), size: params.size))
@@ -338,18 +347,52 @@ public final class LiquidLensView: UIView {
         }
         if let legacyContentMaskBlobView = self.legacyContentMaskBlobView, let legacyLiftedContentBlobMaskView = self.legacyLiftedContentBlobMaskView, let legacySelectionView = self.legacySelectionView {
             let lensFrame = baseLensFrame.insetBy(dx: 4.0, dy: 4.0)
-            let effectiveLensFrame = lensFrame.insetBy(dx: params.isLifted ? -2.0 : 0.0, dy: params.isLifted ? -2.0 : 0.0)
+            
+            // Calculate velocity for spring animation
+            if let previousX = self.legacyPreviousSelectionX {
+                let deltaX = params.selectionX - previousX
+                self.legacyLensVelocity = deltaX * 60.0 // Approximate velocity from frame delta
+            }
+            self.legacyPreviousSelectionX = params.selectionX
+            self.legacyLensTargetPosition = params.selectionX
+            
+            // Start spring animation display link if not already running
+            if self.legacyLensAnimationDisplayLink == nil {
+                self.legacyLensAnimationDisplayLink = SharedDisplayLinkDriver.shared.add(framesPerSecond: .max, { [weak self] _ in
+                    guard let self else { return }
+                    self.updateLegacyLensSpringAnimation()
+                })
+            }
+            
+            // Apply spring-based position with bounce
+            let springPosition = self.legacyLensSpringPosition
+            let springLensFrame = CGRect(origin: CGPoint(x: max(0.0, min(springPosition, params.size.width - params.selectionWidth)), y: 0.0), size: CGSize(width: params.selectionWidth, height: params.size.height)).insetBy(dx: 4.0, dy: 4.0)
+            
+            // Stretching effect based on velocity
+            let stretchFactor: CGFloat = min(1.15, 1.0 + abs(self.legacyLensVelocity) * 0.001)
+            let stretchWidth = springLensFrame.width * stretchFactor
+            let stretchHeight = springLensFrame.height / stretchFactor
+            let effectiveLensFrame = CGRect(
+                x: springLensFrame.midX - stretchWidth * 0.5,
+                y: springLensFrame.midY - stretchHeight * 0.5,
+                width: stretchWidth,
+                height: stretchHeight
+            ).insetBy(dx: params.isLifted ? -2.0 : 0.0, dy: params.isLifted ? -2.0 : 0.0)
             
             if legacyContentMaskBlobView.image?.size.height != lensFrame.height {
                 legacyContentMaskBlobView.image = generateStretchableFilledCircleImage(diameter: lensFrame.height, color: .black)
                 legacyLiftedContentBlobMaskView.image = legacyContentMaskBlobView.image
                 legacySelectionView.image = generateStretchableFilledCircleImage(diameter: lensFrame.height, color: .white)?.withRenderingMode(.alwaysTemplate)
             }
-            transition.setFrame(view: legacyContentMaskBlobView, frame: effectiveLensFrame)
-            transition.setFrame(view: legacyLiftedContentBlobMaskView, frame: effectiveLensFrame)
+            
+            // Animate with spring physics
+            UIView.animate(withDuration: 0.0, delay: 0.0, usingSpringWithDamping: 0.7, initialSpringVelocity: self.legacyLensVelocity * 0.01, options: [.allowUserInteraction, .beginFromCurrentState], animations: {
+                legacyContentMaskBlobView.frame = effectiveLensFrame
+                legacyLiftedContentBlobMaskView.frame = effectiveLensFrame
+                legacySelectionView.frame = effectiveLensFrame
+            }, completion: nil)
             
             legacySelectionView.tintColor = UIColor(white: params.isDark ? 1.0 : 0.0, alpha: params.isDark ? 0.1 : 0.075)
-            transition.setFrame(view: legacySelectionView, frame: effectiveLensFrame)
         }
 
         transition.setFrame(view: self.restingBackgroundView, frame: CGRect(origin: CGPoint(), size: params.size))
@@ -369,5 +412,54 @@ public final class LiquidLensView: UIView {
             self.liftedDisplayLink = nil
             liftedDisplayLink.invalidate()
         }
+    }
+    
+    private func updateLegacyLensSpringAnimation() {
+        guard self.legacyLensAnimationDisplayLink != nil else { return }
+        
+        // Spring physics: damped harmonic oscillator
+        let damping: CGFloat = 0.85
+        let stiffness: CGFloat = 0.15
+        let delta = self.legacyLensTargetPosition - self.legacyLensSpringPosition
+        let acceleration = delta * stiffness - self.legacyLensVelocity * (1.0 - damping)
+        
+        self.legacyLensVelocity += acceleration * 0.016 // ~60fps
+        self.legacyLensSpringPosition += self.legacyLensVelocity * 0.016
+        
+        // Stop animation when close enough to target
+        if abs(delta) < 0.1 && abs(self.legacyLensVelocity) < 0.1 {
+            self.legacyLensSpringPosition = self.legacyLensTargetPosition
+            self.legacyLensVelocity = 0.0
+            if let displayLink = self.legacyLensAnimationDisplayLink {
+                self.legacyLensAnimationDisplayLink = nil
+                displayLink.invalidate()
+            }
+        }
+        
+        // Update lens frames
+        if let legacyContentMaskBlobView = self.legacyContentMaskBlobView,
+           let legacyLiftedContentBlobMaskView = self.legacyLiftedContentBlobMaskView,
+           let legacySelectionView = self.legacySelectionView,
+           let params = self.params {
+            let baseLensFrame = CGRect(origin: CGPoint(x: max(0.0, min(self.legacyLensSpringPosition, params.size.width - params.selectionWidth)), y: 0.0), size: CGSize(width: params.selectionWidth, height: params.size.height)).insetBy(dx: 4.0, dy: 4.0)
+            
+            let stretchFactor: CGFloat = min(1.15, 1.0 + abs(self.legacyLensVelocity) * 0.001)
+            let stretchWidth = baseLensFrame.width * stretchFactor
+            let stretchHeight = baseLensFrame.height / stretchFactor
+            let effectiveLensFrame = CGRect(
+                x: baseLensFrame.midX - stretchWidth * 0.5,
+                y: baseLensFrame.midY - stretchHeight * 0.5,
+                width: stretchWidth,
+                height: stretchHeight
+            ).insetBy(dx: params.isLifted ? -2.0 : 0.0, dy: params.isLifted ? -2.0 : 0.0)
+            
+            legacyContentMaskBlobView.frame = effectiveLensFrame
+            legacyLiftedContentBlobMaskView.frame = effectiveLensFrame
+            legacySelectionView.frame = effectiveLensFrame
+        }
+    }
+    
+    deinit {
+        self.legacyLensAnimationDisplayLink?.invalidate()
     }
 }

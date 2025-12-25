@@ -5,6 +5,7 @@ import AsyncDisplayKit
 import TelegramPresentationData
 import LegacyComponents
 import ComponentFlow
+import GlassBackgroundComponent
 
 public final class SliderComponent: Component {
     public final class Discrete: Equatable {
@@ -124,6 +125,8 @@ public final class SliderComponent: Component {
     public final class View: UIView {
         private var nativeSliderView: SliderView?
         private var sliderView: TGPhotoEditorSliderView?
+        private var knobGlassView: GlassBackgroundView?
+        private var knobTrackingDisplayLink: SharedDisplayLinkDriver.Link?
         
         private var component: SliderComponent?
         private weak var state: EmptyComponentState?
@@ -290,13 +293,31 @@ public final class SliderComponent: Component {
                 }
                 sliderView.interactionBegan = {
                     internalIsTrackingUpdated?(true)
+                    // Start tracking knob position for glass blur
+                    self.startKnobTracking()
                 }
                 sliderView.interactionEnded = {
                     internalIsTrackingUpdated?(false)
+                    // Stop tracking when interaction ends
+                    self.stopKnobTracking()
+                }
+                
+                // Add glass blur to moving knob element
+                if self.knobGlassView == nil {
+                    let knobSize = component.knobSize ?? 28.0
+                    let glassSize = CGSize(width: knobSize + 8.0, height: knobSize + 8.0)
+                    let knobGlassView = GlassBackgroundView()
+                    knobGlassView.isUserInteractionEnabled = false
+                    self.knobGlassView = knobGlassView
+                    self.addSubview(knobGlassView)
+                    knobGlassView.update(size: glassSize, cornerRadius: glassSize.height * 0.5, isDark: false, tintColor: GlassBackgroundView.TintColor(kind: .custom, color: UIColor.white.withAlphaComponent(0.3)), transition: .immediate)
                 }
                 
                 transition.setFrame(view: sliderView, frame: CGRect(origin: CGPoint(x: 0.0, y: 0.0), size: CGSize(width: availableSize.width, height: 44.0)))
                 sliderView.hitTestEdgeInsets = UIEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0)
+                
+                // Update knob glass position
+                self.updateKnobGlassPosition()
             }
             
             return size
@@ -320,6 +341,49 @@ public final class SliderComponent: Component {
             case let .continuous(continuous):
                 continuous.valueUpdated(floatValue)
             }
+            // Update knob glass position when value changes
+            self.updateKnobGlassPosition()
+        }
+        
+        private func startKnobTracking() {
+            guard self.knobTrackingDisplayLink == nil else { return }
+            self.knobTrackingDisplayLink = SharedDisplayLinkDriver.shared.add(framesPerSecond: .max, { [weak self] _ in
+                self?.updateKnobGlassPosition()
+            })
+        }
+        
+        private func stopKnobTracking() {
+            self.knobTrackingDisplayLink?.invalidate()
+            self.knobTrackingDisplayLink = nil
+        }
+        
+        private func updateKnobGlassPosition() {
+            guard let knobGlassView = self.knobGlassView,
+                  let sliderView = self.sliderView,
+                  let component = self.component else {
+                return
+            }
+            
+            // Calculate knob position based on slider value
+            let knobSize = component.knobSize ?? 28.0
+            let glassSize = CGSize(width: knobSize + 8.0, height: knobSize + 8.0)
+            let trackWidth = sliderView.bounds.width
+            let normalizedValue: CGFloat
+            switch component.content {
+            case let .discrete(discrete):
+                normalizedValue = sliderView.maximumValue > 0 ? CGFloat(sliderView.value) / sliderView.maximumValue : 0.0
+            case .continuous:
+                normalizedValue = sliderView.maximumValue > 0 ? CGFloat(sliderView.value) / sliderView.maximumValue : 0.0
+            }
+            
+            let knobX = normalizedValue * (trackWidth - knobSize) + knobSize * 0.5
+            let knobY = sliderView.bounds.midY
+            knobGlassView.center = CGPoint(x: knobX, y: knobY)
+            knobGlassView.isHidden = false
+        }
+        
+        deinit {
+            self.knobTrackingDisplayLink?.invalidate()
         }
     }
 
